@@ -47,8 +47,8 @@ object BookCompilePlugin extends Plugin {
     compile <<= bookCompile dependsOn (compile in Compile),
     test <<= (test in Test),
     testThenCompile <<= bookCompile dependsOn (test in Test),
-    testOnly <<= (testOnly in Test) dependsOn compile,
-    testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
+    testOnly <<= (testOnly in Test) dependsOn compile
+    //testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
   )) ++ Seq(
     watchSources <++= (latexSources in BookConfig),
     watchSources <++= (texSources in BookConfig),
