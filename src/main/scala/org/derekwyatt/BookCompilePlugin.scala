@@ -11,6 +11,7 @@ object BookCompilePlugin extends Plugin {
   val graphvizDirectory   = SettingKey[File]("graphviz-directory")
   val bookTargetDirectory = SettingKey[File]("book-target-directory")
   val testThenCompile     = TaskKey[inc.Analysis]("test-then-compile")
+  val testOnlyThenCompile = TaskKey[inc.Analysis]("test-only-then-compile")
   val latexSources        = TaskKey[Seq[File]]("latex-sources")
   val texSources          = TaskKey[Seq[File]]("tex-sources")
   val dotSources          = TaskKey[Seq[File]]("dot-sources")
@@ -46,8 +47,8 @@ object BookCompilePlugin extends Plugin {
     compile <<= bookCompile dependsOn (compile in Compile),
     test <<= (test in Test),
     testThenCompile <<= bookCompile dependsOn (test in Test),
-    testOnly <<= (testOnly in Test) dependsOn compile
-    // testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
+    testOnly <<= (testOnly in Test) dependsOn compile,
+    testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
   )) ++ Seq(
     watchSources <++= (latexSources in BookConfig),
     watchSources <++= (texSources in BookConfig),
