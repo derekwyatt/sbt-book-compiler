@@ -10,12 +10,13 @@ object BookCompilePlugin extends Plugin {
   val latexDirectory      = SettingKey[File]("latex-directory")
   val graphvizDirectory   = SettingKey[File]("graphviz-directory")
   val bookTargetDirectory = SettingKey[File]("book-target-directory")
+  val testThenCompile     = TaskKey[inc.Analysis]("test-then-compile")
   val latexSources        = TaskKey[Seq[File]]("latex-sources")
   val texSources          = TaskKey[Seq[File]]("tex-sources")
   val dotSources          = TaskKey[Seq[File]]("dot-sources")
   val neatoSources        = TaskKey[Seq[File]]("neato-sources")
 
-  val BookConfig = config("book") extend(Compile)
+  val BookConfig = config("book") extend(Compile, Test)
 
   val srcfileIncludesRE  = """INCLUDE_SOURCE_FILE\{([^}]+)\}""".r
   val sectionIncludesRE  = """INCLUDE_SOURCE_FILE_SECTION\{([^}]+),([^}]+)\}""".r
@@ -25,23 +26,28 @@ object BookCompilePlugin extends Plugin {
   val vimModelineRE      = """//\s+vim:[^\n]*\n""".r
   val fileSectionRE      = """ *//\s*FILE_SECTION_(BEGIN|END)\{[^}]*\}\n""".r
 
-  lazy val bookConfigSettings: Seq[Setting[_]] = inConfig(BookConfig)(Defaults.configSettings ++ Seq(
+  lazy val bookConfigSettings: Seq[Setting[_]] = inConfig(BookConfig)(
+    Defaults.configSettings ++ Seq(
     latexDirectory <<= sourceDirectory / "latex",
     graphvizDirectory <<= sourceDirectory / "graphviz",
     bookTargetDirectory <<= target / "book",
-    latexSources <<= latexDirectory map { d => {
+    latexSources <<= latexDirectory map { d =>
       IO.listFiles(d, FileFilter.globFilter("*.latex")).toSeq
-    }},
-    texSources <<= latexDirectory map { d => {
+    },
+    texSources <<= latexDirectory map { d =>
       IO.listFiles(d, FileFilter.globFilter("*.tex")).toSeq
-    }},
-    dotSources <<= graphvizDirectory map { d => {
+    },
+    dotSources <<= graphvizDirectory map { d =>
       IO.listFiles(d, FileFilter.globFilter("*.dot")).toSeq
-    }},
-    neatoSources <<= graphvizDirectory map { d => {
+    },
+    neatoSources <<= graphvizDirectory map { d =>
       IO.listFiles(d, FileFilter.globFilter("*.neato")).toSeq
-    }},
-    (compile in BookConfig) <<= bookCompile dependsOn (compile in Compile)
+    },
+    compile <<= bookCompile dependsOn (compile in Compile),
+    test <<= (test in Test),
+    testThenCompile <<= bookCompile dependsOn (test in Test),
+    testOnly <<= (testOnly in Test) dependsOn compile
+    // testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
   )) ++ Seq(
     watchSources <++= (latexSources in BookConfig),
     watchSources <++= (texSources in BookConfig),
