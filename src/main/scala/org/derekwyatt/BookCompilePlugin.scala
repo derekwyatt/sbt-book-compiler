@@ -25,7 +25,7 @@ object BookCompilePlugin extends Plugin {
   val texPreprocessDirRE = "TEX_PREPROCESS_DIR".r
   val vimFoldRE          = """//[\{\}]\d""".r
   val vimModelineRE      = """//\s+vim:[^\n]*\n""".r
-  val fileSectionRE      = """ *//\s*FILE_SECTION_(BEGIN|END)\{[^}]*\}\n""".r
+  val fileSectionRE      = """ *(//|#)\s*FILE_SECTION_(BEGIN|END)\{[^}]*\}\n""".r
 
   lazy val bookConfigSettings: Seq[Setting[_]] = inConfig(BookConfig)(
     Defaults.configSettings ++ Seq(
@@ -91,8 +91,8 @@ object BookCompilePlugin extends Plugin {
   def pullSection(data: Seq[String], section: String): Seq[String] = {
     val i = data.iterator
     var pull = false
-    val begin = ("""^\s*// FILE_SECTION_BEGIN\{""" + section + """\}""").r
-    val end = ("""^\s*// FILE_SECTION_END\{""" + section + """\}""").r
+    val begin = ("""^\s*(//|#) FILE_SECTION_BEGIN\{""" + section + """\}""").r
+    val end = ("""^\s*(//|#) FILE_SECTION_END\{""" + section + """\}""").r
     val buffer = ListBuffer.empty[String]
     while (i.hasNext) {
       val s = i.next
