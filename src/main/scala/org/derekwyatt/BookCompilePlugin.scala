@@ -106,7 +106,7 @@ object BookCompilePlugin extends Plugin {
   def pullSrcFileFromGit(location: String): Seq[String] = {
     val Split = ("^([^:]+):(.*)").r
     val Split(branch, file) = location
-    val branchlist = (Process(command = List("git", "branch", "--list"), cwd = new File("src")) !!).split("\n")
+    val branchlist = (Process(command = List("git", "branch"), cwd = new File("src")) !!).split("\n")
     val currentBranch = branchlist.filter { _ startsWith "*" }.map { _ stripPrefix "* " }.headOption
     val data = if (currentBranch.isDefined && currentBranch.get == branch) {
       val f = new File("src/" + file)
