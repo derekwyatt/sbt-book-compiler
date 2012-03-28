@@ -7,6 +7,7 @@ import scala.util.matching.Regex
 import java.util.regex.Matcher.quoteReplacement
 
 object BookCompilePlugin extends Plugin {
+  val latexBuilder        = SettingKey[String]("latex-builder")
   val latexDirectory      = SettingKey[File]("latex-directory")
   val graphvizDirectory   = SettingKey[File]("graphviz-directory")
   val bookTargetDirectory = SettingKey[File]("book-target-directory")
@@ -29,6 +30,7 @@ object BookCompilePlugin extends Plugin {
 
   lazy val bookConfigSettings: Seq[Setting[_]] = inConfig(BookConfig)(
     Defaults.configSettings ++ Seq(
+    latexBuilder := "pdflatex",
     latexDirectory <<= sourceDirectory / "latex",
     graphvizDirectory <<= sourceDirectory / "graphviz",
     bookTargetDirectory <<= target / "book",
@@ -151,14 +153,14 @@ object BookCompilePlugin extends Plugin {
       false
   }
 
-  def processBookFile(needToBuild: Boolean, bookFile: File, outdir: File, log: ProcessLogger) = {
+  def processBookFile(needToBuild: Boolean, bookFile: File, outdir: File, latexBuilder: String, log: ProcessLogger) = {
     val outfile = ("\\.latex".r).replaceAllIn(bookFile.getName, ".pdf")
     val outfileNoExt = ("\\.latex".r).replaceAllIn(bookFile.getName, "")
     val tempfile = makeLatexSubstitutions(bookFile, outdir, outfileNoExt + ".tmp.latex")
     val targetFile = outdir / outfile
     if (needToBuild || !targetFile.exists || targetFile.lastModified < bookFile.lastModified) {
       log.info("Building %s in %s".format(outfile, outdir))
-      val exitCode = Process(List("pdflatex",
+      val exitCode = Process(List(latexBuilder,
                                   "-output-directory=" + outdir,
                                   "-jobname=" + outfileNoExt,
                                   "-halt-on-error",
@@ -167,8 +169,8 @@ object BookCompilePlugin extends Plugin {
     }
   }
 
-  def bookCompile = (latexSources, texSources, dotSources, neatoSources, bookTargetDirectory, streams) map {
-    (latexFs, texFs, dotFs, neatoFs, targ, s) => {
+  def bookCompile = (latexSources, texSources, dotSources, neatoSources, bookTargetDirectory, latexBuilder, streams) map {
+    (latexFs, texFs, dotFs, neatoFs, targ, builder, s) => {
       targ.mkdirs
       val logger = new ProcessLogger {
         def info(o: => String): Unit = s.log.info(o)
@@ -178,7 +180,7 @@ object BookCompilePlugin extends Plugin {
       val needToBuild = ((dotFs map   { f => processGraphViz(f, targ, logger) }) ++
                          (neatoFs map { f => processGraphViz(f, targ, logger) })) ++
                          (texFs map   { f => processTexFile(f, targ, logger) }) exists (_ == true)
-      latexFs foreach { f => processBookFile(needToBuild, f, targ, logger) }
+      latexFs foreach { f => processBookFile(needToBuild, f, targ, builder, logger) }
       sbt.inc.Analysis.Empty
     }
   }
