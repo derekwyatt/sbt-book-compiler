@@ -10,6 +10,7 @@ object BookCompilePlugin extends Plugin {
   val latexBuilder        = SettingKey[String]("latex-builder")
   val latexDirectory      = SettingKey[File]("latex-directory")
   val graphvizDirectory   = SettingKey[File]("graphviz-directory")
+  val imagesDirectory     = SettingKey[File]("images-directory")
   val bookTargetDirectory = SettingKey[File]("book-target-directory")
   val testThenCompile     = TaskKey[inc.Analysis]("test-then-compile")
   val testOnlyThenCompile = TaskKey[inc.Analysis]("test-only-then-compile")
@@ -23,6 +24,7 @@ object BookCompilePlugin extends Plugin {
   val srcfileIncludesRE  = """INCLUDE_SOURCE_FILE\{([^}]+)\}""".r
   val sectionIncludesRE  = """INCLUDE_SOURCE_FILE_SECTION\{([^}]+),([^}]+)\}""".r
   val graphicsOuputDirRE = "GRAPHICS_OUTPUT_DIR".r
+  val imagesSrcDirRE     = "IMAGES_DIR".r
   val texPreprocessDirRE = "TEX_PREPROCESS_DIR".r
   val vimFoldRE          = """//[\{\}]\d""".r
   val vimModelineRE      = """//\s+vim:[^\n]*\n""".r
@@ -33,6 +35,7 @@ object BookCompilePlugin extends Plugin {
     latexBuilder := "pdflatex",
     latexDirectory <<= sourceDirectory / "latex",
     graphvizDirectory <<= sourceDirectory / "graphviz",
+    imagesDirectory <<= sourceDirectory / "images",
     bookTargetDirectory <<= target / "book",
     latexSources <<= latexDirectory map { d =>
       IO.listFiles(d, FileFilter.globFilter("*.latex")).toSeq
@@ -123,7 +126,7 @@ object BookCompilePlugin extends Plugin {
       data.split('\n')
   }
 
-  def makeLatexSubstitutions(latexSrcFile: File, targetDir: File, outFilename: String): File = {
+  def makeLatexSubstitutions(latexSrcFile: File, targetDir: File, outFilename: String, imageDir: File): File = {
     val outfile = targetDir / outFilename
     val convertedData = IO.read(latexSrcFile) over srcfileIncludesRE fold { (data, matched) =>
       val srcfileIncludesRE(fileName) = matched
@@ -138,25 +141,26 @@ object BookCompilePlugin extends Plugin {
         texPreprocessDirRE withString targetDir.toString replaceAllOf
         vimFoldRE withString "" replaceAllOf
         vimModelineRE withString "" replaceAllOf
-        fileSectionRE withString ""
+        fileSectionRE withString "" replaceAllOf
+        imagesSrcDirRE withString imageDir.toString
     IO.write(outfile, convertedData)
     outfile
   }
 
-  def processTexFile(infile: File, outdir: File, log: ProcessLogger) = {
+  def processTexFile(infile: File, outdir: File, imageDir: File, log: ProcessLogger) = {
     val targetFile = outdir / infile.getName
     if (!targetFile.exists || targetFile.lastModified < infile.lastModified) {
-      makeLatexSubstitutions(infile, outdir, infile.getName)
+      makeLatexSubstitutions(infile, outdir, infile.getName, imageDir)
       true
     }
     else
       false
   }
 
-  def processBookFile(needToBuild: Boolean, bookFile: File, outdir: File, latexBuilder: String, log: ProcessLogger) = {
+  def processBookFile(needToBuild: Boolean, bookFile: File, outdir: File, latexBuilder: String, imageDir: File, log: ProcessLogger) = {
     val outfile = ("\\.latex".r).replaceAllIn(bookFile.getName, ".pdf")
     val outfileNoExt = ("\\.latex".r).replaceAllIn(bookFile.getName, "")
-    val tempfile = makeLatexSubstitutions(bookFile, outdir, outfileNoExt + ".tmp.latex")
+    val tempfile = makeLatexSubstitutions(bookFile, outdir, outfileNoExt + ".tmp.latex", imageDir)
     val targetFile = outdir / outfile
     if (needToBuild || !targetFile.exists || targetFile.lastModified < bookFile.lastModified) {
       log.info("Building %s in %s".format(outfile, outdir))
@@ -169,8 +173,8 @@ object BookCompilePlugin extends Plugin {
     }
   }
 
-  def bookCompile = (latexSources, texSources, dotSources, neatoSources, bookTargetDirectory, latexBuilder, streams) map {
-    (latexFs, texFs, dotFs, neatoFs, targ, builder, s) => {
+  def bookCompile = (latexSources, texSources, dotSources, neatoSources, bookTargetDirectory, latexBuilder, imagesDirectory, streams) map {
+    (latexFs, texFs, dotFs, neatoFs, targ, builder, imageDir, s) => {
       targ.mkdirs
       val logger = new ProcessLogger {
         def info(o: => String): Unit = s.log.info(o)
@@ -179,8 +183,8 @@ object BookCompilePlugin extends Plugin {
       }
       val needToBuild = ((dotFs map   { f => processGraphViz(f, targ, logger) }) ++
                          (neatoFs map { f => processGraphViz(f, targ, logger) })) ++
-                         (texFs map   { f => processTexFile(f, targ, logger) }) exists (_ == true)
-      latexFs foreach { f => processBookFile(needToBuild, f, targ, builder, logger) }
+                         (texFs map   { f => processTexFile(f, targ, imageDir, logger) }) exists (_ == true)
+      latexFs foreach { f => processBookFile(needToBuild, f, targ, builder, imageDir, logger) }
       sbt.inc.Analysis.Empty
     }
   }
