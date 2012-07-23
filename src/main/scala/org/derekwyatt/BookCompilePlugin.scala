@@ -12,6 +12,7 @@ object BookCompilePlugin extends Plugin {
   val graphvizDirectory   = SettingKey[File]("graphviz-directory")
   val imagesDirectory     = SettingKey[File]("images-directory")
   val bookTargetDirectory = SettingKey[File]("book-target-directory")
+  val substitutes         = SettingKey[Map[String, String]]("substitutes")
   val testThenCompile     = TaskKey[inc.Analysis]("test-then-compile")
   val testOnlyThenCompile = TaskKey[inc.Analysis]("test-only-then-compile")
   val latexSources        = TaskKey[Seq[File]]("latex-sources")
@@ -32,34 +33,35 @@ object BookCompilePlugin extends Plugin {
 
   lazy val bookConfigSettings: Seq[Setting[_]] = inConfig(BookConfig)(
     Defaults.configSettings ++ Seq(
-    latexBuilder := "pdflatex",
-    latexDirectory <<= sourceDirectory / "latex",
-    graphvizDirectory <<= sourceDirectory / "graphviz",
-    imagesDirectory <<= sourceDirectory / "images",
-    bookTargetDirectory <<= target / "book",
-    latexSources <<= latexDirectory map { d =>
-      IO.listFiles(d, FileFilter.globFilter("*.latex")).toSeq
-    },
-    texSources <<= latexDirectory map { d =>
-      IO.listFiles(d, FileFilter.globFilter("*.tex")).toSeq
-    },
-    dotSources <<= graphvizDirectory map { d =>
-      IO.listFiles(d, FileFilter.globFilter("*.dot")).toSeq
-    },
-    neatoSources <<= graphvizDirectory map { d =>
-      IO.listFiles(d, FileFilter.globFilter("*.neato")).toSeq
-    },
-    compile <<= bookCompile dependsOn (compile in Compile),
-    test <<= (test in Test),
-    testThenCompile <<= bookCompile dependsOn (test in Test),
-    testOnly <<= (testOnly in Test) dependsOn compile
-    //testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
-  )) ++ Seq(
-    watchSources <++= (latexSources in BookConfig),
-    watchSources <++= (texSources in BookConfig),
-    watchSources <++= (dotSources in BookConfig),
-    watchSources <++= (neatoSources in BookConfig)
-  )
+      latexBuilder := "pdflatex",
+      substitutes := Map.empty,
+      latexDirectory <<= sourceDirectory / "latex",
+      graphvizDirectory <<= sourceDirectory / "graphviz",
+      imagesDirectory <<= sourceDirectory / "images",
+      bookTargetDirectory <<= target / "book",
+      latexSources <<= latexDirectory map { d =>
+        IO.listFiles(d, FileFilter.globFilter("*.latex")).toSeq
+      },
+      texSources <<= latexDirectory map { d =>
+        IO.listFiles(d, FileFilter.globFilter("*.tex")).toSeq
+      },
+      dotSources <<= graphvizDirectory map { d =>
+        IO.listFiles(d, FileFilter.globFilter("*.dot")).toSeq
+      },
+      neatoSources <<= graphvizDirectory map { d =>
+        IO.listFiles(d, FileFilter.globFilter("*.neato")).toSeq
+      },
+      compile <<= bookCompile dependsOn (compile in Compile),
+      test <<= (test in Test),
+      testThenCompile <<= bookCompile dependsOn (test in Test),
+      testOnly <<= (testOnly in Test) dependsOn compile
+      //testOnlyThenCompile <<= bookCompile dependsOn (testOnly in Test)
+    )) ++ Seq(
+      watchSources <++= (latexSources in BookConfig),
+      watchSources <++= (texSources in BookConfig),
+      watchSources <++= (dotSources in BookConfig),
+      watchSources <++= (neatoSources in BookConfig)
+    )
 
   def processGraphViz(infile: File, outdir: File, log: ProcessLogger) = {
     val srcfile = infile.getAbsoluteFile
@@ -69,7 +71,8 @@ object BookCompilePlugin extends Plugin {
     if (!targetFile.exists || targetFile.lastModified < srcfile.lastModified) {
       log.info("Building %s in %s".format(outfile, outdir))
       val exitCode = Process(List(ext, "-Tpdf", "-o", targetFile.toString, srcfile.toString)) ! log
-      if (exitCode != 0) sys.error("Error building graph file " + srcfile)
+      if (exitCode != 0)
+        sys.error("Error building graph file " + srcfile)
       true
     }
     else
@@ -93,7 +96,7 @@ object BookCompilePlugin extends Plugin {
   }
   implicit def string2FoldableRegex(s: String) = new FoldableRegex(s)
 
-  def pullSection(data: Seq[String], section: String): Seq[String] = {
+  def pullSection(fileName: String, data: Seq[String], section: String): Seq[String] = {
     val i = data.iterator
     var pull = false
     val begin = ("""^\s*(//|#) FILE_SECTION_BEGIN\{""" + section + """\}""").r
@@ -105,6 +108,8 @@ object BookCompilePlugin extends Plugin {
       else if (end.findFirstIn(s).isDefined) pull = false
       else if (pull) buffer += s
     }
+    if (buffer.isEmpty)
+      throw new Exception("Section %s not found in %s".format(section, fileName))
     buffer.toSeq
   }
 
@@ -126,7 +131,11 @@ object BookCompilePlugin extends Plugin {
       data.split('\n')
   }
 
-  def makeLatexSubstitutions(latexSrcFile: File, targetDir: File, outFilename: String, imageDir: File): File = {
+  def makeLatexSubstitutions(latexSrcFile: File,
+                             targetDir: File,
+                             outFilename: String,
+                             imageDir: File,
+                             substitutes: Map[String, String]): File = {
     val outfile = targetDir / outFilename
     val convertedData = IO.read(latexSrcFile) over srcfileIncludesRE fold { (data, matched) =>
       val srcfileIncludesRE(fileName) = matched
@@ -136,45 +145,63 @@ object BookCompilePlugin extends Plugin {
       val sectionIncludesRE(fileName, section) = matched
       val toInsert = pullSrcFileFromGit(fileName)
       (("""INCLUDE_SOURCE_FILE_SECTION\{""" + fileName + """,\s*""" + section + """\}""").r).replaceAllIn(data,
-        quoteReplacement(pullSection(toInsert, section).mkString("\n")))
+        quoteReplacement(pullSection(fileName, toInsert, section).mkString("\n")))
     } replaceAllOf graphicsOuputDirRE withString targetDir.toString replaceAllOf
-        texPreprocessDirRE withString targetDir.toString replaceAllOf
-        vimFoldRE withString "" replaceAllOf
-        vimModelineRE withString "" replaceAllOf
-        fileSectionRE withString "" replaceAllOf
-        imagesSrcDirRE withString imageDir.toString
-    IO.write(outfile, convertedData)
+    texPreprocessDirRE withString targetDir.toString replaceAllOf
+    vimFoldRE withString "" replaceAllOf
+    vimModelineRE withString "" replaceAllOf
+    fileSectionRE withString "" replaceAllOf
+    imagesSrcDirRE withString imageDir.toString
+
+    val substituted = substitutes.foldLeft(convertedData.data) { (acc, m) =>
+      acc.replaceAllLiterally(m._1, m._2)
+    }
+    IO.write(outfile, substituted)
     outfile
   }
 
-  def processTexFile(infile: File, outdir: File, imageDir: File, log: ProcessLogger) = {
+  def processTexFile(infile: File, outdir: File, imageDir: File, log: ProcessLogger, substitutes: Map[String, String]) = {
     val targetFile = outdir / infile.getName
     if (!targetFile.exists || targetFile.lastModified < infile.lastModified) {
-      makeLatexSubstitutions(infile, outdir, infile.getName, imageDir)
+      makeLatexSubstitutions(infile, outdir, infile.getName, imageDir, substitutes)
       true
     }
     else
       false
   }
 
-  def processBookFile(needToBuild: Boolean, bookFile: File, outdir: File, latexBuilder: String, imageDir: File, log: ProcessLogger) = {
+  def processBookFile(needToBuild: Boolean,
+                      bookFile: File,
+                      outdir: File,
+                      latexBuilder: String,
+                      imageDir: File,
+                      substitutes: Map[String, String],
+                      log: ProcessLogger) = {
     val outfile = ("\\.latex".r).replaceAllIn(bookFile.getName, ".pdf")
     val outfileNoExt = ("\\.latex".r).replaceAllIn(bookFile.getName, "")
-    val tempfile = makeLatexSubstitutions(bookFile, outdir, outfileNoExt + ".tmp.latex", imageDir)
+    val tempfile = makeLatexSubstitutions(bookFile, outdir, outfileNoExt + ".tmp.latex", imageDir, substitutes)
     val targetFile = outdir / outfile
     if (needToBuild || !targetFile.exists || targetFile.lastModified < bookFile.lastModified) {
       log.info("Building %s in %s".format(outfile, outdir))
       val exitCode = Process(List(latexBuilder,
-                                  "-output-directory=" + outdir,
-                                  "-jobname=" + outfileNoExt,
-                                  "-halt-on-error",
-                                  tempfile.toString)) ! log
-      if (exitCode != 0) sys.error("Error building PDF file " + bookFile)
+        "-output-directory=" + outdir,
+        "-jobname=" + outfileNoExt,
+        "-halt-on-error",
+        tempfile.toString)) ! log
+    if (exitCode != 0) sys.error("Error building PDF file " + bookFile)
     }
   }
 
-  def bookCompile = (latexSources, texSources, dotSources, neatoSources, bookTargetDirectory, latexBuilder, imagesDirectory, streams) map {
-    (latexFs, texFs, dotFs, neatoFs, targ, builder, imageDir, s) => {
+  def bookCompile = (latexSources,
+                     texSources,
+                     dotSources,
+                     neatoSources,
+                     bookTargetDirectory,
+                     latexBuilder,
+                     imagesDirectory,
+                     substitutes,
+                     streams) map {
+    (latexFs, texFs, dotFs, neatoFs, targ, builder, imageDir, subs, s) => {
       targ.mkdirs
       val logger = new ProcessLogger {
         def info(o: => String): Unit = s.log.info(o)
@@ -182,9 +209,9 @@ object BookCompilePlugin extends Plugin {
         def buffer[T](f: => T): T = f
       }
       val needToBuild = ((dotFs map   { f => processGraphViz(f, targ, logger) }) ++
-                         (neatoFs map { f => processGraphViz(f, targ, logger) })) ++
-                         (texFs map   { f => processTexFile(f, targ, imageDir, logger) }) exists (_ == true)
-      latexFs foreach { f => processBookFile(needToBuild, f, targ, builder, imageDir, logger) }
+        (neatoFs map { f => processGraphViz(f, targ, logger) })) ++
+      (texFs map   { f => processTexFile(f, targ, imageDir, logger, subs) }) exists (_ == true)
+      latexFs foreach { f => processBookFile(needToBuild, f, targ, builder, imageDir, subs, logger) }
       sbt.inc.Analysis.Empty
     }
   }
